@@ -343,3 +343,125 @@ def call_claude_api(compressed_messages: list[dict], existing_status: str, git_d
             log.error(f"API call failed (attempt {attempt+1}): {e}")
             if attempt == 0: time.sleep(3)
     return None
+
+
+# ---------------------------------------------------------------------------
+# Fallback (no API)
+# ---------------------------------------------------------------------------
+def generate_fallback_session_log(messages: list[dict], meta: dict) -> str:
+    """Generate minimal session log without API summary."""
+    user_texts = []
+    for m in messages:
+        if m["type"] == "user" and isinstance(m.get("content"), str):
+            user_texts.append(m["content"])
+    files_changed = set()
+    for m in messages:
+        if m["type"] == "assistant" and isinstance(m.get("content"), list):
+            for block in m["content"]:
+                if block.get("type") == "tool_use":
+                    fp = block.get("file_path") or block.get("input", {}).get("file_path", "")
+                    if fp:
+                        files_changed.add(fp)
+    title = user_texts[0][:30] if user_texts else "untitled"
+    title = sanitize_filename(title)
+    lines = [
+        "---", f"date: {meta['date']}", f"project: {meta['project']}",
+        f"duration_min: {meta['duration_min']}", f"model: {meta['model']}",
+        f"session_id: {meta['session_id']}", "ai_summary: false",
+        "---", f"# {title}", "", "## 사용자 메시지",
+    ]
+    for t in user_texts[:10]:
+        lines.append(f"- {t[:200]}")
+    if files_changed:
+        lines += ["", "## 변경된 파일"]
+        for f in sorted(files_changed):
+            lines.append(f"- `{f}`")
+    return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+def main():
+    try:
+        hook_input = json.load(sys.stdin)
+    except Exception as e:
+        log.error(f"Failed to read stdin: {e}")
+        sys.exit(0)
+    transcript_path = hook_input.get("transcript_path")
+    cwd = hook_input.get("cwd", "")
+    session_id = hook_input.get("session_id", "unknown")
+    if not transcript_path or not Path(transcript_path).exists():
+        log.warning(f"Transcript not found: {transcript_path}")
+        sys.exit(0)
+    cfg = load_config(cwd)
+    if not cfg:
+        sys.exit(0)
+    vault_path = Path(cfg.get("vault_path", ""))
+    if not vault_path.exists():
+        log.warning(f"Vault path does not exist: {vault_path}")
+        sys.exit(0)
+    project_name = cfg.get("project_name", Path(cwd).name)
+    messages = parse_transcript(transcript_path)
+    if len(messages) < 3:
+        log.info("Session too short, skipping")
+        sys.exit(0)
+    first_ts = messages[0].get("timestamp", "")
+    last_ts = messages[-1].get("timestamp", "")
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    model = "unknown"
+    for m in messages:
+        if m["type"] == "assistant" and m.get("model"):
+            model = m["model"]
+            break
+    duration_min = 0
+    try:
+        t1 = datetime.fromisoformat(first_ts.replace("Z", "+00:00"))
+        t2 = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
+        duration_min = max(1, int((t2 - t1).total_seconds() / 60))
+    except Exception:
+        pass
+    meta = {"date": today, "project": project_name, "duration_min": duration_min, "model": model, "session_id": session_id[:8]}
+    project_dir = vault_path / "projects" / project_name
+    sessions_dir = project_dir / "sessions"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    compressed = compress_transcript(messages)
+    existing_status = get_existing_status(project_dir)
+    git_diff = get_git_diff_stat(cwd)
+    context_sources = gather_context_sources(cwd, cfg)
+    api_response = call_claude_api(compressed, existing_status, git_diff, context_sources, cfg)
+    if api_response:
+        title = api_response["session"]["title"]
+        filename = get_session_filename(str(sessions_dir), today, sanitize_filename(title))
+        session_stem = Path(filename).stem
+        session_md = generate_session_log(api_response, meta)
+        (sessions_dir / filename).write_text(session_md, encoding="utf-8")
+        log.info(f"Session log: {filename}")
+        decisions = api_response.get("decisions", [])
+        if decisions:
+            entries = [generate_decision_entry(d, today, session_stem) for d in decisions]
+            update_decisions_file(project_dir / "decisions.md", entries, project_name)
+            log.info(f"Decisions: {len(decisions)} entries added")
+        roadmap_content = api_response.get("roadmap", "")
+        if roadmap_content:
+            (project_dir / "_status.md").write_text(roadmap_content, encoding="utf-8")
+            log.info("Status/roadmap updated")
+    else:
+        log.warning("API failed, generating fallback session log")
+        fallback_md = generate_fallback_session_log(messages, meta)
+        title_text = messages[0].get("content", "untitled") if messages else "untitled"
+        if isinstance(title_text, list):
+            title_text = "untitled"
+        title_slug = sanitize_filename(title_text[:30])
+        filename = get_session_filename(str(sessions_dir), today, title_slug)
+        (sessions_dir / filename).write_text(fallback_md, encoding="utf-8")
+        log.info(f"Fallback session log: {filename}")
+    log.info("obsidian-sync completed")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        log.error(f"Unhandled exception: {e}")
+    sys.exit(0)
