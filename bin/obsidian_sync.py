@@ -31,6 +31,14 @@ log = get_logger()
 # ---------------------------------------------------------------------------
 GLOBAL_CONFIG_PATH = Path.home() / ".claude" / "obsidian.json"
 
+
+def normalize_path(p: str) -> str:
+    """Normalize MSYS/git-bash paths (/c/Users/...) to Windows paths on Windows."""
+    if sys.platform == "win32" and re.match(r'^/[a-zA-Z]/', p):
+        return p[1].upper() + ':' + p[2:].replace('/', '\\')
+    return p
+
+
 def load_config(cwd: str) -> dict | None:
     """Load merged global + project config. Returns None if not configured."""
     if not GLOBAL_CONFIG_PATH.exists():
@@ -388,8 +396,8 @@ def main():
     except Exception as e:
         log.error(f"Failed to read stdin: {e}")
         sys.exit(0)
-    transcript_path = hook_input.get("transcript_path")
-    cwd = hook_input.get("cwd", "")
+    transcript_path = normalize_path(hook_input.get("transcript_path", ""))
+    cwd = normalize_path(hook_input.get("cwd", ""))
     session_id = hook_input.get("session_id", "unknown")
     if not transcript_path or not Path(transcript_path).exists():
         log.warning(f"Transcript not found: {transcript_path}")

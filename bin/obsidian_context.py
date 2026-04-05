@@ -11,6 +11,13 @@ from pathlib import Path
 GLOBAL_CONFIG_PATH = Path.home() / ".claude" / "obsidian.json"
 
 
+def normalize_path(p: str) -> str:
+    """Normalize MSYS/git-bash paths (/c/Users/...) to Windows paths on Windows."""
+    if sys.platform == "win32" and re.match(r'^/[a-zA-Z]/', p):
+        return p[1].upper() + ':' + p[2:].replace('/', '\\')
+    return p
+
+
 def load_config(cwd: str) -> dict | None:
     if not GLOBAL_CONFIG_PATH.exists():
         return None
@@ -66,7 +73,7 @@ def main():
         hook_input = json.load(sys.stdin)
     except Exception:
         sys.exit(0)
-    cwd = hook_input.get("cwd", "")
+    cwd = normalize_path(hook_input.get("cwd", ""))
     cfg = load_config(cwd)
     if not cfg:
         sys.exit(0)
