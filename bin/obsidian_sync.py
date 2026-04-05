@@ -243,3 +243,103 @@ def update_decisions_file(filepath: Path, new_entries: list[str], project: str):
         content = f"---\nproject: {project}\nupdated: {today}\n---\n# 결정 로그\n\n"
         content += "\n\n".join(new_entries) + "\n"
     filepath.write_text(content, encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Context gathering
+# ---------------------------------------------------------------------------
+def gather_context_sources(cwd: str, cfg: dict) -> str:
+    """Gather content from context sources (specs, plans, gstack, etc)."""
+    parts = []
+    gstack_slug = cfg.get("gstack_slug")
+    if cfg.get("include_gstack") and gstack_slug:
+        gstack_dir = Path.home() / ".gstack" / "projects" / gstack_slug
+        ceo_dir = gstack_dir / "ceo-plans"
+        if ceo_dir.exists():
+            ceo_files = sorted(ceo_dir.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if ceo_files:
+                content = ceo_files[0].read_text(encoding="utf-8")[:3000]
+                parts.append(f"## CEO Plan (latest): {ceo_files[0].name}\n{content}")
+        eng_files = sorted(gstack_dir.glob("*-eng-review-*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if eng_files:
+            content = eng_files[0].read_text(encoding="utf-8")[:3000]
+            parts.append(f"## Eng Review (latest): {eng_files[0].name}\n{content}")
+        learnings_path = gstack_dir / "learnings.jsonl"
+        if learnings_path.exists():
+            lines = learnings_path.read_text(encoding="utf-8").strip().split("\n")
+            last_10 = lines[-10:] if len(lines) > 10 else lines
+            parts.append(f"## Learnings (last {len(last_10)})\n" + "\n".join(last_10))
+    for source in cfg.get("context_sources", []):
+        src_path = Path(cwd) / source["path"]
+        if src_path.is_file():
+            content = src_path.read_text(encoding="utf-8")[:3000]
+            parts.append(f"## {source['type']}: {source['path']}\n{content}")
+        elif src_path.is_dir():
+            files = sorted(src_path.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)[:3]
+            for fp in files:
+                content = fp.read_text(encoding="utf-8")[:2000]
+                parts.append(f"## {source['type']}: {fp.name}\n{content}")
+    return "\n\n---\n\n".join(parts) if parts else ""
+
+
+def get_git_diff_stat(cwd: str) -> str:
+    """Run git diff --stat in the project directory."""
+    import subprocess
+    try:
+        result = subprocess.run(["git", "diff", "--stat", "HEAD"], cwd=cwd, capture_output=True, text=True, timeout=5)
+        return result.stdout.strip() or "(no changes)"
+    except Exception:
+        return "(git diff unavailable)"
+
+
+def get_existing_status(vault_project_dir: Path) -> str:
+    """Read existing _status.md if it exists."""
+    status_path = vault_project_dir / "_status.md"
+    if status_path.exists():
+        return status_path.read_text(encoding="utf-8")
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# Claude API
+# ---------------------------------------------------------------------------
+def call_claude_api(compressed_messages: list[dict], existing_status: str, git_diff: str, context_sources: str, cfg: dict) -> dict | None:
+    """Call Claude API with compressed transcript and context. Returns parsed JSON."""
+    try:
+        import anthropic
+    except ImportError:
+        log.error("anthropic SDK not installed. Run: pip install anthropic")
+        return None
+    skill_dir = Path(__file__).resolve().parent.parent
+    prompt_template = (skill_dir / "prompts" / "summarize.txt").read_text(encoding="utf-8")
+    roadmap_rules = (skill_dir / "prompts" / "roadmap_rules.txt").read_text(encoding="utf-8")
+    prompt_template = prompt_template.replace("{ROADMAP_RULES}", roadmap_rules)
+    transcript_text = json.dumps(compressed_messages, ensure_ascii=False, indent=None)
+    user_parts = [f"## TRANSCRIPT\n{transcript_text}"]
+    if existing_status:
+        user_parts.append(f"## EXISTING_STATUS\n{existing_status}")
+    user_parts.append(f"## GIT_DIFF\n{git_diff}")
+    if context_sources:
+        user_parts.append(f"## CONTEXT_SOURCES\n{context_sources}")
+    user_message = "\n\n".join(user_parts)
+    model = cfg.get("model", "claude-haiku-4-5-20251001")
+    timeout = cfg.get("api_timeout", 30)
+    client = anthropic.Anthropic()
+    for attempt in range(2):
+        try:
+            response = client.messages.create(
+                model=model, max_tokens=8192, system=prompt_template,
+                messages=[{"role": "user", "content": user_message}], timeout=timeout,
+            )
+            text = response.content[0].text.strip()
+            if text.startswith("```"):
+                text = re.sub(r'^```\w*\n?', '', text)
+                text = re.sub(r'\n?```$', '', text)
+            return json.loads(text)
+        except json.JSONDecodeError as e:
+            log.error(f"API response not valid JSON (attempt {attempt+1}): {e}")
+            if attempt == 0: time.sleep(3)
+        except Exception as e:
+            log.error(f"API call failed (attempt {attempt+1}): {e}")
+            if attempt == 0: time.sleep(3)
+    return None
