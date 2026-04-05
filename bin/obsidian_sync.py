@@ -127,3 +127,119 @@ def compress_transcript(messages: list[dict], max_chars: int = 500000) -> list[d
         compressed.pop(0)
         text = json.dumps(compressed, ensure_ascii=False)
     return compressed
+
+
+# ---------------------------------------------------------------------------
+# File naming
+# ---------------------------------------------------------------------------
+def sanitize_filename(name: str) -> str:
+    """Replace unsafe chars with hyphens, collapse spaces."""
+    name = re.sub(r'[/\\:*?"<>|]', '-', name)
+    name = re.sub(r'\s+', '-', name.strip())
+    name = re.sub(r'-+', '-', name).strip('-')
+    return name
+
+
+def get_session_filename(sessions_dir: str, date: str, title: str) -> str:
+    """Generate unique session filename, adding _N suffix on collision."""
+    base = f"{date}_{sanitize_filename(title)}"
+    candidate = f"{base}.md"
+    if not Path(sessions_dir, candidate).exists():
+        return candidate
+    n = 2
+    while Path(sessions_dir, f"{base}_{n}.md").exists():
+        n += 1
+    return f"{base}_{n}.md"
+
+
+# ---------------------------------------------------------------------------
+# Markdown generators
+# ---------------------------------------------------------------------------
+def generate_session_log(api_response: dict, meta: dict) -> str:
+    """Generate session log markdown from API response + metadata."""
+    s = api_response["session"]
+    st = api_response["status"]
+    decisions = api_response.get("decisions", [])
+    lines = [
+        "---",
+        f"date: {meta['date']}",
+        f"project: {meta['project']}",
+        f"duration_min: {meta['duration_min']}",
+        f"model: {meta['model']}",
+        f"tags: [{', '.join(s.get('tags', []))}]",
+    ]
+    if s.get("workflow"):
+        lines.append(f"workflow: [{', '.join(s['workflow'])}]")
+    if s.get("task_size"):
+        lines.append(f"task_size: {s['task_size']}")
+    lines += [
+        f"session_id: {meta['session_id']}",
+        "ai_summary: true",
+        "---",
+        f"# {s['title']}",
+        "",
+        "## 요약",
+        s.get("summary", ""),
+        "",
+        "## 주요 활동",
+    ]
+    for act in s.get("key_activities", []):
+        lines.append(f"- {act}")
+    lines += ["", "## 변경된 파일"]
+    for f in s.get("files_changed", []):
+        lines.append(f"- `{f}`")
+    if decisions:
+        lines += ["", "## 결정 사항"]
+        for d in decisions:
+            lines += [
+                f"### {d['title']}",
+                f"- **결정**: {d['decision']}",
+            ]
+            if d.get("alternatives"):
+                lines.append(f"- **대안**: {d['alternatives']}")
+            lines.append(f"- **근거**: {d['rationale']}")
+    lines += ["", "## 상태"]
+    for item in st.get("completed", []):
+        lines.append(f"- ✅ {item}")
+    for item in st.get("in_progress", []):
+        lines.append(f"- 🔄 {item}")
+    for item in st.get("blockers", []):
+        lines.append(f"- ❌ {item}")
+    for item in st.get("next_steps", []):
+        lines.append(f"- 🔲 {item}")
+    return "\n".join(lines) + "\n"
+
+
+def generate_decision_entry(decision: dict, date: str, session_stem: str) -> str:
+    """Generate a single decision entry for decisions.md."""
+    lines = [
+        f"## {date}: {decision['title']}",
+        f"- **결정**: {decision['decision']}",
+    ]
+    if decision.get("alternatives"):
+        lines.append(f"- **대안**: {decision['alternatives']}")
+    lines += [
+        f"- **근거**: {decision['rationale']}",
+        f"- **세션**: [[{session_stem}]]",
+    ]
+    return "\n".join(lines)
+
+
+def update_decisions_file(filepath: Path, new_entries: list[str], project: str):
+    """Append new decisions to decisions.md (newest on top)."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if filepath.exists():
+        content = filepath.read_text(encoding="utf-8")
+        content = re.sub(r'updated: \d{4}-\d{2}-\d{2}', f'updated: {today}', content)
+        marker = "# 결정 로그\n"
+        idx = content.find(marker)
+        if idx >= 0:
+            insert_pos = idx + len(marker)
+            insert_text = "\n" + "\n\n".join(new_entries) + "\n"
+            content = content[:insert_pos] + insert_text + content[insert_pos:]
+        else:
+            content += "\n" + "\n\n".join(new_entries) + "\n"
+    else:
+        content = f"---\nproject: {project}\nupdated: {today}\n---\n# 결정 로그\n\n"
+        content += "\n\n".join(new_entries) + "\n"
+    filepath.write_text(content, encoding="utf-8")
