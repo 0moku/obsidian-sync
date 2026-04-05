@@ -2,7 +2,7 @@
 
 ## 입력
 - TRANSCRIPT: 세션 대화 내용 (압축됨)
-- EXISTING_STATUS: 기존 _status.md 내용 (없을 수 있음)
+- EXISTING_STATUS: 기존 status.md 내용 (없을 수 있음)
 - GIT_DIFF: git diff --stat 결과
 - CONTEXT_SOURCES: spec/plan 문서 내용 (없을 수 있음)
 
@@ -33,7 +33,7 @@
     "blockers": ["블로커 (없으면 빈 배열)"],
     "next_steps": ["다음 할 일"]
   },
-  "roadmap": "업데이트된 _status.md의 전체 내용 (프론트매터 포함). 아래 로드맵 규칙을 반드시 따를 것. 기존 _status.md가 없으면 새로 생성."
+  "roadmap": "업데이트된 status.md의 전체 내용 (프론트매터 포함). 아래 로드맵 규칙을 반드시 따를 것. 기존 status.md가 없으면 새로 생성."
 }
 
 ## 로드맵 규칙
@@ -42,5 +42,5 @@
 ## 중요
 - JSON만 출력. 마크다운 코드 펜스로 감싸지 마라.
 - title은 파일명으로 쓰이므로 /\:*?"<>| 문자를 포함하지 마라.
-- roadmap 필드는 _status.md 파일의 전체 내용이다. 프론트매터(---)부터 시작하라.
-- 기존 _status.md가 있으면 그것을 기반으로 업데이트하라. 없으면 transcript와 context에서 추론하여 새로 만들어라.
+- roadmap 필드는 status.md 파일의 전체 내용이다. 프론트매터(---)부터 시작하라.
+- 기존 status.md가 있으면 그것을 기반으로 업데이트하라. 없으면 transcript와 context에서 추론하여 새로 만들어라.

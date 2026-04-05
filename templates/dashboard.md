@@ -4,7 +4,7 @@
 ```dataview
 TABLE status, current_phase, updated, last_session
 FROM "claude-dev/projects"
-WHERE file.name = "_status"
+WHERE file.name = "status"
 SORT updated DESC
 ```
 

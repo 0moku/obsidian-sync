@@ -32,7 +32,7 @@ def load_config(cwd: str) -> dict | None:
 
 
 def extract_context(status_content: str, decisions_content: str) -> str:
-    """Build concise context string from _status.md and decisions.md."""
+    """Build concise context string from status.md and decisions.md."""
     lines = []
     if status_content:
         lines.append("## 프로젝트 로드맵 (Obsidian 기준)")
@@ -82,7 +82,7 @@ def main():
     project_dir = vault_path / "projects" / project_name
     status_content = ""
     decisions_content = ""
-    status_path = project_dir / "_status.md"
+    status_path = project_dir / "status.md"
     decisions_path = project_dir / "decisions.md"
     if status_path.exists():
         status_content = status_path.read_text(encoding="utf-8")

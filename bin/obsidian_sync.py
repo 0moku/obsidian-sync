@@ -301,8 +301,8 @@ def get_git_diff_stat(cwd: str) -> str:
 
 
 def get_existing_status(vault_project_dir: Path) -> str:
-    """Read existing _status.md if it exists."""
-    status_path = vault_project_dir / "_status.md"
+    """Read existing status.md if it exists."""
+    status_path = vault_project_dir / "status.md"
     if status_path.exists():
         return status_path.read_text(encoding="utf-8")
     return ""
@@ -452,7 +452,7 @@ def main():
             log.info(f"Decisions: {len(decisions)} entries added")
         roadmap_content = api_response.get("roadmap", "")
         if roadmap_content:
-            (project_dir / "_status.md").write_text(roadmap_content, encoding="utf-8")
+            (project_dir / "status.md").write_text(roadmap_content, encoding="utf-8")
             log.info("Status/roadmap updated")
     else:
         log.warning("API failed, generating fallback session log")
