@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""obsidian_context: SessionStart hook — inject Obsidian roadmap into Claude Code."""
+"""obsidian_context: SessionStart hook — inject Obsidian roadmap + pending reminder."""
 
 import json
-import os
 import re
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 GLOBAL_CONFIG_PATH = Path.home() / ".claude" / "obsidian.json"
+PENDING_PATH = Path.home() / ".claude" / "obsidian-pending.json"
 
 
 def normalize_path(p: str) -> str:
@@ -68,6 +67,28 @@ def extract_context(status_content: str, decisions_content: str) -> str:
     return "\n".join(lines) if lines else ""
 
 
+def get_pending_reminder() -> str:
+    """Check for unsynced previous session and return reminder text."""
+    if not PENDING_PATH.exists():
+        return ""
+    try:
+        pending = json.loads(PENDING_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    backup_time = pending.get("backup_time", "")
+    session_id = pending.get("session_id", "")[:8]
+    if not backup_time:
+        return ""
+    # Format: show date/time portion
+    time_display = backup_time[:19].replace("T", " ")
+    return (
+        f"\n---\n"
+        f"## Obsidian Sync 알림\n"
+        f"이전 세션({time_display} UTC, id:{session_id})이 아직 정리되지 않았습니다.\n"
+        f"`/obsidian-sync`로 정리할 수 있습니다."
+    )
+
+
 def main():
     try:
         hook_input = json.load(sys.stdin)
@@ -88,11 +109,13 @@ def main():
         status_content = status_path.read_text(encoding="utf-8")
     if decisions_path.exists():
         decisions_content = decisions_path.read_text(encoding="utf-8")
-    if not status_content and not decisions_content:
-        sys.exit(0)
+
     context = extract_context(status_content, decisions_content)
-    if context:
-        print(json.dumps({"systemMessage": context}))
+    pending_reminder = get_pending_reminder()
+
+    message = (context + pending_reminder).strip()
+    if message:
+        print(json.dumps({"systemMessage": message}))
     sys.exit(0)
 
 
