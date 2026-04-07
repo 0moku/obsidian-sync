@@ -18,14 +18,15 @@ allowed-tools:
   - AskUserQuestion
 hooks:
   PostToolUse:
-    - hooks:
+    - matcher: "Bash"
+      hooks:
         - type: command
-          command: "bash ${CLAUDE_SKILL_DIR}/bin/run_backup.sh"
+          command: "python ~/.claude/skills/obsidian-sync/bin/obsidian_backup.py"
           timeout: 5
   SessionStart:
     - hooks:
         - type: command
-          command: "bash ${CLAUDE_SKILL_DIR}/bin/run_context.sh"
+          command: "python ~/.claude/skills/obsidian-sync/bin/obsidian_context.py"
           timeout: 10
 ---
 
