@@ -1,3 +1,4 @@
 #!/usr/bin/env bash
 # SessionStart hook wrapper — delegates to Python
-exec python "${CLAUDE_SKILL_DIR}/bin/obsidian_context.py"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec python "${SCRIPT_DIR}/obsidian_context.py"
