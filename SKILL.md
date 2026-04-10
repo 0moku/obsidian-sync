@@ -175,6 +175,69 @@ status.md의 로드맵을 업데이트할 때 반드시 준수:
 
 7. **기존 로드맵 존중**: 이전 세션에서 합의된 항목을 근거 없이 수정하지 않는다.
 
+## 도메인 노트
+
+프로젝트의 핵심 도메인 지식을 Obsidian vault에 항목별 개별 파일로 기록한다.
+`/obsidian-sync` 실행 시 자동으로 최신 상태를 유지한다.
+
+### Vault 구조
+
+```
+vault/projects/{project_name}/
+├── status.md
+├── decisions.md
+├── sessions/
+└── domain/
+    ├── {category_id}/
+    │   ├── {item_id}.md
+    │   └── ...
+    └── {category_id}/
+        └── ...
+```
+
+항목의 `id`는 코드베이스의 식별자(enum, 변수명, 클래스명 등)를 기반으로 결정한다.
+같은 항목은 항상 같은 파일에 매핑되어야 업데이트가 정확하다.
+
+### 노트 파일 형식
+
+```markdown
+---
+project: {project_name}
+category: {category_id}
+item_id: {item_id}
+updated: YYYY-MM-DD
+status: active | deprecated
+deprecated_reason: (deprecated일 때만)
+deprecated_date: (deprecated일 때만)
+---
+# {항목 제목}
+
+## 개요
+항목에 대한 1-2문장 설명
+
+## 상세
+카테고리 특성에 맞는 상세 내용.
+코드베이스 + 세션 컨텍스트에서 추출한 구조화된 정보.
+섹션 구조는 카테고리 description을 기반으로 자유롭게 결정.
+
+## 관련 항목
+- [[다른 노트로의 Obsidian 내부 링크]]
+
+---
+> ⚠️ 이 구분선 아래 내용은 자동 동기화 시 보존됩니다.
+## 메모
+
+```
+
+### 도메인 노트 업데이트 규칙
+
+1. **자동 재생성 영역**: `---` 구분선 + `## 메모` 위 섹션은 매 동기화 시 재생성 (덮어쓰기)
+2. **보존 영역**: `## 메모` 이하는 무조건 보존. 사용자가 Obsidian에서 직접 작성한 내용이 있을 수 있다.
+3. **항목 삭제 금지**: 코드에서 사라진 항목의 파일을 삭제하지 않는다.
+   `status: deprecated` + `deprecated_reason`, `deprecated_date`를 frontmatter에 추가한다.
+4. **정보 소스**: 코드베이스(모델, 스키마, 서비스 로직, seed 데이터)가 기본이고,
+   세션에서 논의된 암묵지(임상적 맥락, 학술적 판단 근거 등)도 반영한다.
+
 ## 설정 파일 구조
 
 ### 글로벌: ~/.claude/obsidian.json
