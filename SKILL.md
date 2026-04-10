@@ -193,6 +193,24 @@ status.md의 로드맵을 업데이트할 때 반드시 준수:
   "include_superpowers": true,
   "context_sources": [
     {"type": "type-name", "path": "relative/path"}
+  ],
+  "domain_categories": [
+    {
+      "id": "category-id",
+      "label": "표시명",
+      "description": "What to extract from codebase for this category"
+    }
   ]
 }
 ```
+
+#### domain_categories 필드
+
+| 필드 | 용도 |
+|------|------|
+| `id` | 폴더/파일명에 사용 (영문 snake_case) |
+| `label` | Obsidian 노트 내 표시명 |
+| `description` | Claude가 코드베이스에서 무엇을 추출할지 판단하는 근거. 이 설명이 스캔의 핵심 지시 |
+
+`domain_categories`는 선택 사항이다. 미설정 시 `/obsidian-sync` 실행 시점에
+세션 컨텍스트 + 코드베이스를 분석하여 카테고리를 자동 추천한다.
