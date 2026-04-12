@@ -30,33 +30,88 @@ def load_config(cwd: str) -> dict | None:
     return {**global_cfg, **{k: v for k, v in project_cfg.items() if v is not None}}
 
 
+def _extract_v2(status_content: str) -> list[str]:
+    """Parse v2 status.md format (현황 요약 table + 블로커 + 진행중 Phase)."""
+    lines = []
+    lines.append("## 프로젝트 로드맵 (Obsidian 기준)")
+
+    # Frontmatter current_phase
+    phase_match = re.search(r'current_phase:\s*"?([^"\n]+)"?', status_content)
+    if phase_match:
+        lines.append(f"현재 Phase: {phase_match.group(1)}")
+
+    # 현황 요약 table (from header through blank line or next section)
+    summary_match = re.search(r'## 현황 요약\n(.*?)(?=\n## |\Z)', status_content, re.DOTALL)
+    if summary_match:
+        lines.append("")
+        lines.append("### 현황 요약")
+        lines.append(summary_match.group(1).strip())
+
+    # 블로커 / 최근 완료 lines
+    blocker_match = re.search(r'\*\*블로커\*\*:\s*(.+)', status_content)
+    if blocker_match:
+        lines.append("")
+        lines.append(f"블로커: {blocker_match.group(1).strip()}")
+    recent_match = re.search(r'\*\*최근 완료\*\*:\s*(.+)', status_content)
+    if recent_match:
+        lines.append(f"최근 완료: {recent_match.group(1).strip()}")
+
+    # Active phase: find section with 🔄 marker and count progress
+    active_match = re.search(r'^(## .+🔄)\n(.*?)(?=\n## |\Z)', status_content, re.DOTALL | re.MULTILINE)
+    if active_match:
+        header = active_match.group(1).strip()
+        body = active_match.group(2).strip()
+        total = len(re.findall(r'- \[[ x]\]', body))
+        done = len(re.findall(r'- \[x\]', body))
+        if total > 0:
+            lines.append(f"진행중: {header.replace('## ', '')} ({done}/{total})")
+
+    return lines
+
+
+def _extract_v1(status_content: str) -> list[str]:
+    """Parse v1 status.md format (로드맵 + 워크플로우 상태 + 현재 세션 상태)."""
+    lines = []
+    lines.append("## 프로젝트 로드맵 (Obsidian 기준)")
+
+    phase_match = re.search(r'current_phase:\s*"?([^"\n]+)"?', status_content)
+    if phase_match:
+        lines.append(f"현재 Phase: {phase_match.group(1)}")
+
+    roadmap_match = re.search(r'## 로드맵\n(.*?)(?=\n## |\Z)', status_content, re.DOTALL)
+    if roadmap_match:
+        roadmap = roadmap_match.group(1).strip()
+        total = len(re.findall(r'- \[[ x]\]', roadmap))
+        done = len(re.findall(r'- \[x\]', roadmap))
+        if total > 0:
+            lines.append(f"진행률: {done}/{total}")
+        lines.append("")
+        lines.append(roadmap)
+
+    wf_match = re.search(r'## 하이브리드 워크플로우 상태\n(.*?)(?=\n## |\Z)', status_content, re.DOTALL)
+    if wf_match:
+        lines.append("")
+        lines.append("### 하이브리드 워크플로우 상태")
+        lines.append(wf_match.group(1).strip())
+
+    cs_match = re.search(r'## 현재 세션 상태\n(.*?)(?=\n## |\Z)', status_content, re.DOTALL)
+    if cs_match:
+        lines.append("")
+        lines.append("### 최근 세션 상태")
+        lines.append(cs_match.group(1).strip())
+
+    return lines
+
+
 def extract_context(status_content: str, decisions_content: str) -> str:
     """Build concise context string from status.md and decisions.md."""
     lines = []
     if status_content:
-        lines.append("## 프로젝트 로드맵 (Obsidian 기준)")
-        phase_match = re.search(r'current_phase:\s*"?([^"\n]+)"?', status_content)
-        if phase_match:
-            lines.append(f"현재 Phase: {phase_match.group(1)}")
-        roadmap_match = re.search(r'## 로드맵\n(.*?)(?=\n## |\Z)', status_content, re.DOTALL)
-        if roadmap_match:
-            roadmap = roadmap_match.group(1).strip()
-            total = len(re.findall(r'- \[[ x]\]', roadmap))
-            done = len(re.findall(r'- \[x\]', roadmap))
-            if total > 0:
-                lines.append(f"진행률: {done}/{total}")
-            lines.append("")
-            lines.append(roadmap)
-        wf_match = re.search(r'## 하이브리드 워크플로우 상태\n(.*?)(?=\n## |\Z)', status_content, re.DOTALL)
-        if wf_match:
-            lines.append("")
-            lines.append("### 하이브리드 워크플로우 상태")
-            lines.append(wf_match.group(1).strip())
-        cs_match = re.search(r'## 현재 세션 상태\n(.*?)(?=\n## |\Z)', status_content, re.DOTALL)
-        if cs_match:
-            lines.append("")
-            lines.append("### 최근 세션 상태")
-            lines.append(cs_match.group(1).strip())
+        # v2 detection: presence of 현황 요약 section
+        if '## 현황 요약' in status_content:
+            lines.extend(_extract_v2(status_content))
+        else:
+            lines.extend(_extract_v1(status_content))
     if decisions_content:
         decision_headers = re.findall(r'^## \d{4}-\d{2}-\d{2}: .+$', decisions_content, re.MULTILINE)
         if decision_headers:
