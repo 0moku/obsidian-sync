@@ -17,6 +17,12 @@ allowed-tools:
   - Grep
   - AskUserQuestion
 hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: "python ~/.claude/skills/obsidian-sync/bin/vault_commit_check.py"
+          timeout: 5
   PostToolUse:
     - matcher: "Bash"
       hooks:
@@ -244,7 +250,36 @@ vault/projects/{project_name}/
    - "워크플로우 상태" 같은 append-only 섹션 없음
    - 로드맵 업데이트 규칙 (아래) 준수
 
-7. **카테고리 체크**
+7. **Vault Drift 수정 + Memory 정비**
+
+   이 세션에서 변경된 코드와 vault/memory의 일관성을 확인하고 수정한다.
+
+   **7a. Vault task drift 수정**
+   1. `.claude/obsidian.json`의 `task_mapping` 로드
+   2. 이 세션의 `git diff` (또는 `git log --since` 오늘)에서 변경된 파일 목록 추출
+   3. `task_mapping` 키워드로 영향받는 vault task 파일 식별
+   4. 각 영향받는 task 파일에 대해:
+      - 코드베이스 현재 상태와 vault 내용 비교
+      - `deploy_status`, `item_count`, "현재 (배포됨)" 섹션이 실제와 일치하는지 확인
+      - 불일치 발견 시 task 노트 재생성 (8단계 규칙 적용)
+      - `updated:` 날짜를 오늘로 갱신 (내용을 실제 검증/갱신한 경우에만. 날짜만 변경 금지)
+   5. status.md 요약 테이블도 task 파일과 일치하도록 동기화
+
+   **7b. 미매핑 파일 감지 (audit)**
+   1. 알려진 과제 코드 디렉토리 스캔:
+      - `app/lib/screens/battery/tasks/` — Flutter task widgets
+      - `server/app/services/` — scoring/sampling services
+   2. 각 파일명에서 task 키워드 추출
+   3. `task_mapping`에 없는 키워드 발견 시 경고: "⚠ 미매핑 코드 파일: {path} — obsidian.json task_mapping에 추가 필요"
+
+   **7c. Volatile memory 정비**
+   1. `~/.claude/projects/{dir}/memory/project_*.md` 스캔
+   2. `volatile: true`이면서 `memory_stale_days` 초과한 파일 목록화
+   3. 각 stale memory에 대해: 현재 코드 상태와 교차 검증
+   4. 내용이 맞으면 `volatile` 유지하되 마지막 수정 시각 갱신 (touch)
+   5. 내용이 틀리면 memory 내용 업데이트 또는 삭제
+
+8. **카테고리 체크** (기존 7단계)
    - `.claude/obsidian.json`에 `domain_categories`가 없거나 비어있으면:
      1. 코드베이스 분석 — tasks (과제)와 shared (공통 컴포넌트) 감지
      2. 사용자에게 추천 제시 → 승인/수정 → `.claude/obsidian.json`의 `domain_categories`에 저장
@@ -253,9 +288,9 @@ vault/projects/{project_name}/
      2. 새 task가 필요하면 추천 → 승인 시 추가
      3. 해당 없으면 스킵 (질문 없이 진행)
 
-8. **task 노트 + shared 노트 갱신**
+9. **task 노트 + shared 노트 갱신**
 
-   **8a. task 노트 갱신**
+   **9a. task 노트 갱신**
    - `tasks/` 내 각 파일에 대해:
      1. 이번 세션에서 해당 과제를 다뤘는지 판단
         - 판단 기준 (둘 중 하나): 세션에서 해당 과제를 논의함 / `git diff`에 관련 파일 포함
@@ -271,17 +306,17 @@ vault/projects/{project_name}/
      4. 새로 감지된 과제는 task 노트 템플릿으로 새 파일 생성
    - 코드에서 사라진 과제의 파일은 삭제하지 않고 frontmatter에 `status: deprecated`, `deprecated_reason`, `deprecated_date` 설정
 
-   **8b. shared 노트 갱신**
+   **9b. shared 노트 갱신**
    - `shared/` 내 각 파일에 대해:
      1. 이번 세션에서 해당 주제를 다뤘는지 판단
      2. 변경 없으면 스킵
      3. 변경 있으면: 기존 읽기 → `## 메모` 보존 → 코드+세션에서 재생성 → 복원
    - task 노트보다 갱신 빈도 낮음 (과제 간 공통 요소가 변경될 때만)
 
-9. **pending.json 삭제**
+10. **pending.json 삭제**
    - `~/.claude/obsidian-pending.json` 삭제하여 다음 세션 리마인더 방지
 
-10. **완료 메시지** 출력
+11. **완료 메시지** 출력
 
 ### /obsidian-setup
 

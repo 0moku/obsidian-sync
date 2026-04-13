@@ -2,8 +2,11 @@
 """obsidian_context: SessionStart hook — inject Obsidian roadmap + pending reminder."""
 
 import json
+import os
 import re
+import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 GLOBAL_CONFIG_PATH = Path.home() / ".claude" / "obsidian.json"
@@ -144,6 +147,138 @@ def get_pending_reminder() -> str:
     )
 
 
+def parse_frontmatter(content: str) -> dict:
+    """Extract YAML frontmatter as a dict (simple key: value parsing)."""
+    fm = {}
+    match = re.match(r'^---\s*\n(.*?)\n---', content, re.DOTALL)
+    if not match:
+        return fm
+    for line in match.group(1).split('\n'):
+        kv = line.split(':', 1)
+        if len(kv) == 2:
+            key = kv[0].strip()
+            value = kv[1].strip().strip('"').strip("'")
+            fm[key] = value
+    return fm
+
+
+def check_vault_drift(config: dict, cwd: str) -> str:
+    """Check vault task files for drift against recent git commits.
+
+    For each task_mapping entry:
+    1. Get the vault task file's `updated:` date from frontmatter
+    2. Get the most recent git commit date that touched files matching the keywords
+    3. If git commit date > vault updated date, the task file is stale
+
+    Returns warning text (empty string if no drift).
+    """
+    task_mapping = config.get("task_mapping", {})
+    if not task_mapping:
+        return ""
+    vault_path = Path(config.get("vault_path", ""))
+    project_name = config.get("project_name", "")
+    if not vault_path or not project_name:
+        return ""
+    tasks_dir = vault_path / "projects" / project_name / "tasks"
+    stale = []
+    for pattern, task_name in task_mapping.items():
+        # Avoid duplicate checks for the same task file
+        if any(t == task_name for t, _, _ in stale):
+            continue
+        # Read vault task file updated date
+        task_file = tasks_dir / f"{task_name}.md"
+        if not task_file.exists():
+            continue
+        try:
+            content = task_file.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        fm = parse_frontmatter(content)
+        vault_date_str = fm.get("updated", "")
+        if not vault_date_str:
+            continue
+        try:
+            vault_date = datetime.strptime(vault_date_str[:10], "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        # Find most recent git commit date for any keyword in this mapping
+        keywords = [k.strip() for k in pattern.split("|")]
+        latest_commit_date = None
+        for keyword in keywords:
+            try:
+                result = subprocess.run(
+                    ["git", "log", "-1", "--format=%Y-%m-%d", "--", f"*{keyword}*"],
+                    capture_output=True, text=True, cwd=cwd, timeout=10
+                )
+                if result.returncode != 0 or not result.stdout.strip():
+                    continue
+                commit_date = datetime.strptime(result.stdout.strip()[:10], "%Y-%m-%d").date()
+                if latest_commit_date is None or commit_date > latest_commit_date:
+                    latest_commit_date = commit_date
+            except Exception:
+                continue
+        if latest_commit_date is None:
+            continue
+        if latest_commit_date > vault_date:
+            stale.append((task_name, vault_date_str[:10], latest_commit_date.isoformat()))
+    if not stale:
+        return ""
+    lines = [
+        "\n---",
+        "## \u26a0 Vault Drift \uac10\uc9c0",
+        "\ub2e4\uc74c vault task \ud30c\uc77c\uc774 \ucf54\ub4dc\ubcf4\ub2e4 \uc624\ub798\ub410\uc2b5\ub2c8\ub2e4:",
+    ]
+    for task_name, v_date, c_date in stale:
+        lines.append(f"  - {task_name}.md (vault: {v_date}, code: {c_date})")
+    lines.append("\ucee4\ubc0b \uc804\uc5d0 vault task \ud30c\uc77c\uc744 \uac31\uc2e0\ud558\uc138\uc694.")
+    return "\n".join(lines)
+
+
+def check_memory_staleness(config: dict, cwd: str) -> str:
+    """Find stale volatile memory files.
+
+    Scans project_*.md in the Claude memory directory.
+    Only checks files with `volatile: true` in frontmatter.
+    Flags files with mtime older than config["memory_stale_days"] (default 14).
+
+    Returns warning text (empty string if no stale files).
+    """
+    stale_days = config.get("memory_stale_days", 14)
+    # Derive memory dir from cwd
+    normalized = Path(cwd).resolve()
+    path_str = str(normalized)
+    dir_name = path_str.replace(":", "").replace("\\", "-").replace("/", "-")
+    memory_dir = Path.home() / ".claude" / "projects" / dir_name / "memory"
+    if not memory_dir.exists():
+        return ""
+    now = datetime.now()
+    stale = []
+    for f in sorted(memory_dir.glob("project_*.md")):
+        try:
+            content = f.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        fm = parse_frontmatter(content)
+        if fm.get("volatile", "").lower() != "true":
+            continue
+        try:
+            mtime = datetime.fromtimestamp(os.path.getmtime(f))
+        except Exception:
+            continue
+        age_days = (now - mtime).days
+        if age_days > stale_days:
+            stale.append((f.name, age_days))
+    if not stale:
+        return ""
+    lines = [
+        f"\n## \u26a0 Stale Memory \uac10\uc9c0",
+        f"\ub2e4\uc74c volatile memory\uac00 {stale_days}\uc77c \uc774\uc0c1 \uacbd\uacfc\ud588\uc2b5\ub2c8\ub2e4:",
+    ]
+    for name, age in stale:
+        lines.append(f"  - {name} ({age}d)")
+    return "\n".join(lines)
+
+
 def main():
     try:
         hook_input = json.load(sys.stdin)
@@ -167,8 +302,10 @@ def main():
 
     context = extract_context(status_content, decisions_content)
     pending_reminder = get_pending_reminder()
+    drift_warning = check_vault_drift(cfg, cwd)
+    memory_warning = check_memory_staleness(cfg, cwd)
 
-    message = (context + pending_reminder).strip()
+    message = (context + pending_reminder + drift_warning + memory_warning).strip()
     if message:
         print(json.dumps({"systemMessage": message}))
     sys.exit(0)
